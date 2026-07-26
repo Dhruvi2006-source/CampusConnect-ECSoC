@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { useMutation } from "@/hooks/useReactQueryReplacement";
+import { useUndoableState } from "@/hooks/useUndoableState";
 import { Plus, MapPin, CalendarIcon } from "lucide-react";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
@@ -56,6 +57,70 @@ export function CreateEventDialog({ user }: { user: User | null }) {
     defaultValues,
     mode: "onBlur",
   });
+
+  const isUndoingRedoingRef = useRef(false);
+  const {
+    state: undoableState,
+    set: setUndoableState,
+    undo,
+    redo,
+    resetState,
+  } = useUndoableState(defaultValues, 1000);
+
+  const watchedValues = form.watch();
+
+  // Reset/initialize undoable state when the modal opens/closes
+  useEffect(() => {
+    if (open) {
+      resetState(form.getValues());
+    }
+  }, [open, resetState, form]);
+
+  // Sync form inputs to the undoable state history
+  useEffect(() => {
+    if (isUndoingRedoingRef.current) {
+      isUndoingRedoingRef.current = false;
+      return;
+    }
+    setUndoableState(watchedValues);
+  }, [watchedValues, setUndoableState]);
+
+  // Sync undoableState back to form values
+  useEffect(() => {
+    const currentFormValues = form.getValues();
+    if (JSON.stringify(currentFormValues) !== JSON.stringify(undoableState)) {
+      isUndoingRedoingRef.current = true;
+      form.reset(undoableState);
+    }
+  }, [undoableState, form]);
+
+  // Add Ctrl+Z and Ctrl+Y keydown shortcut listener
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isCtrl = e.ctrlKey || e.metaKey;
+      if (isCtrl) {
+        if (e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          if (e.shiftKey) {
+            redo();
+            toast.success("Redo action performed");
+          } else {
+            undo();
+            toast.success("Undo action performed");
+          }
+        } else if (e.key.toLowerCase() === "y") {
+          e.preventDefault();
+          redo();
+          toast.success("Redo action performed");
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, undo, redo]);
 
   // Watch values via form.watch to keep TypeScript quiet about schema property limits
   const watchedLocation = form.watch("location");
@@ -113,6 +178,7 @@ export function CreateEventDialog({ user }: { user: User | null }) {
       toast.success("Event created!");
       window.dispatchEvent(new Event("refetchEvents"));
       form.reset(defaultValues);
+      resetState(defaultValues);
       setOpen(false);
     },
     onError: (error: Error) => {
