@@ -33,10 +33,12 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Define an extended interface locally to handle the extra location field safely
 interface LocalEventFormValues extends EventFormValues {
   location?: string;
+  requiresApproval?: boolean;
 }
 
 const defaultValues: LocalEventFormValues = {
@@ -45,6 +47,7 @@ const defaultValues: LocalEventFormValues = {
   location: "",
   startDate: "",
   endDate: "",
+  requiresApproval: false,
 };
 
 export function CreateEventDialog({ user }: { user: User | null }) {
@@ -103,6 +106,7 @@ export function CreateEventDialog({ user }: { user: User | null }) {
         event_date: startDateIso,
         created_by: user.id,
         club_id: myClub.id,
+        requires_approval: values.requiresApproval || false,
       });
 
       if (error) {
@@ -356,6 +360,26 @@ export function CreateEventDialog({ user }: { user: User | null }) {
                 </FormItem>
               </div>
             </div>
+
+            <FormField
+              control={form.control}
+              name="requiresApproval"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border-2 border-black bg-white p-4 shadow-sm">
+                  <FormControl>
+                    <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                  </FormControl>
+                  <div className="space-y-1 leading-none">
+                    <FormLabel className="font-bold cursor-pointer">
+                      Requires Manual Approval
+                    </FormLabel>
+                    <p className="text-xs text-black/50">
+                      Organizers must manually approve attendee RSVPs.
+                    </p>
+                  </div>
+                </FormItem>
+              )}
+            />
 
             <DialogFooter className="pt-2">
               <Button type="submit" disabled={createEvent.isPending} className="w-full sm:w-auto">
