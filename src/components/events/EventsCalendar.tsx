@@ -1,9 +1,11 @@
-import { Calendar, dateFnsLocalizer } from "react-big-calendar";
-import { format, parse, startOfWeek, getDay } from "date-fns";
+import { format, getDay, parse, startOfWeek } from "date-fns";
 import { enUS } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef } from "react";
 import "react-big-calendar/lib/css/react-big-calendar.css";
+import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 const locales = {
   "en-US": enUS,
@@ -19,11 +21,12 @@ const localizer = dateFnsLocalizer({
 
 interface EventItem {
   id: string;
+  short_id?: string | null;
   title: string;
   description: string | null;
   event_date: string | null;
-  start_date: string | null;
-  end_date: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
   location: string | null;
   banner_url?: string | null;
   clubs: { name: string } | { name: string }[] | null;
@@ -46,7 +49,7 @@ export default function EventsCalendar({ events }: EventsCalendarProps) {
     const end = e.end_date ? new Date(e.end_date) : new Date(start.getTime() + 60 * 60 * 1000);
 
     return {
-      id: e.id,
+      id: e.short_id || e.id,
       title: e.title,
       start,
       end,
@@ -99,8 +102,12 @@ export default function EventsCalendar({ events }: EventsCalendarProps) {
         startAccessor="start"
         endAccessor="end"
         style={{ height: "100%" }}
-        views={["month", "week", "day"]}
-        defaultView="month"
+        views={["month", "week"]}
+        view={view}
+        onView={(newView) => setView(newView)}
+        eventPropGetter={() => ({
+          className: "calendar-rsvp-event",
+        })}
         onSelectEvent={(event: { id: string }) => {
           navigate(`/events/${event.id}`);
         }}
