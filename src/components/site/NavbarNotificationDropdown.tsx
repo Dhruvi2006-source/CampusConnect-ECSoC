@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Search, X, BellOff, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Search, X } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import NotificationItem from "./NotificationItem";
 import { createClient } from "@/lib/supabase/client";
 
@@ -338,9 +341,20 @@ export const NavbarNotificationDropdown: React.FC = () => {
                   key={item.id}
                   notification={item}
                   onMarkAsRead={handleMarkAsRead}
+                  onDelete={handleDeleteNotification}
                 />
               ))
             )}
+          </div>
+
+          <div className="border-t border-gray-200 bg-gray-50 rounded-b-lg">
+            <Link
+              to="/notifications"
+              onClick={() => setIsOpen(false)}
+              className="block w-full p-3 text-center text-sm font-semibold text-blue-600 hover:text-blue-800 hover:bg-gray-100 transition-colors"
+            >
+              View All Notifications
+            </Link>
           </div>
         </div>
       )}
