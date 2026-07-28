@@ -2,6 +2,7 @@ import { Calendar, dateFnsLocalizer } from "react-big-calendar";
 import { format, parse, startOfWeek, getDay } from "date-fns";
 import { enUS } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
+import { useEffect, useRef } from "react";
 import "react-big-calendar/lib/css/react-big-calendar.css";
 
 const locales = {
@@ -34,6 +35,7 @@ interface EventsCalendarProps {
 
 export default function EventsCalendar({ events }: EventsCalendarProps) {
   const navigate = useNavigate();
+  const calendarRef = useRef<HTMLDivElement>(null);
 
   const formattedEvents = events.map((e) => {
     const start = e.start_date
@@ -52,8 +54,45 @@ export default function EventsCalendar({ events }: EventsCalendarProps) {
     };
   });
 
+  useEffect(() => {
+    if (!calendarRef.current) return;
+
+    // Find all navigation buttons inside react-big-calendar and add descriptive aria-labels
+    const buttons = calendarRef.current.querySelectorAll(".rbc-btn-group button");
+    buttons.forEach((btn) => {
+      const text = btn.textContent?.toLowerCase() || "";
+      if (text === "today") {
+        btn.setAttribute("aria-label", "Go to today");
+      } else if (text === "back" || text === "prev" || btn.classList.contains("rbc-prev-button")) {
+        btn.setAttribute("aria-label", "Previous period");
+      } else if (text === "next" || btn.classList.contains("rbc-next-button")) {
+        btn.setAttribute("aria-label", "Next period");
+      } else if (text === "month") {
+        btn.setAttribute("aria-label", "Switch to month view");
+      } else if (text === "week") {
+        btn.setAttribute("aria-label", "Switch to week view");
+      } else if (text === "day") {
+        btn.setAttribute("aria-label", "Switch to day view");
+      }
+    });
+
+    // Ensure all grid cells have proper roles
+    const gridCells = calendarRef.current.querySelectorAll(".rbc-day-bg");
+    gridCells.forEach((cell, idx) => {
+      cell.setAttribute("role", "gridcell");
+      cell.setAttribute("tabindex", "0");
+      cell.setAttribute("aria-label", `Calendar day ${idx + 1}`);
+    });
+  }, [events]);
+
   return (
-    <div className="neu-border bg-white p-4 h-[600px] md:h-[700px] w-full">
+    <div
+      ref={calendarRef}
+      className="neu-border bg-white p-4 h-[600px] md:h-[700px] w-full"
+      role="region"
+      aria-label="Event Calendar Grid"
+      tabIndex={0}
+    >
       <Calendar
         localizer={localizer}
         events={formattedEvents}
