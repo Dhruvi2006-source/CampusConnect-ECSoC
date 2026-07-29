@@ -91,28 +91,51 @@ export default function EventsPage() {
     isFetching,
     refetch,
   } = useQuery({
-    queryKey: ["events", user?.id ?? "anonymous"],
+    queryKey: ["events", user?.id ?? "anonymous", searchQuery],
     queryFn: async () => {
-      const { data, count } = await supabase
-        .from("club_analytics_view")
-        .select(
-          `
-          id, title, description, event_date, start_date, end_date, location, banner_url,
-          clubs (name),
-          event_rsvps (id, user_id),
-          saved_events (id, user_id)
-        `,
-          { count: "exact" },
-        )
-        .order("event_date", { ascending: true })
-        .range(0, PAGE_SIZE - 1);
+      let fetchedData: unknown[] | null = null;
+      let fetchedCount: number | null = null;
 
-      if (count !== null) {
-        setTotalCount(count);
+      if (searchQuery.trim()) {
+        const { data, error } = await supabase
+          .rpc("search_events", { query_text: searchQuery })
+          .select(
+            `
+            id, title, description, event_date, start_date, end_date, location, banner_url,
+            clubs (name),
+            event_rsvps (id, user_id),
+            saved_events (id, user_id)
+          `,
+          );
+        if (error) throw error;
+        const results = (data || []) as unknown[];
+        fetchedData = results;
+        fetchedCount = results.length;
+      } else {
+        const { data, count, error } = await supabase
+          .from("club_analytics_view")
+          .select(
+            `
+            id, title, description, event_date, start_date, end_date, location, banner_url,
+            clubs (name),
+            event_rsvps (id, user_id),
+            saved_events (id, user_id)
+          `,
+            { count: "exact" },
+          )
+          .order("event_date", { ascending: true })
+          .range(0, PAGE_SIZE - 1);
+        if (error) throw error;
+        fetchedData = data as unknown[];
+        fetchedCount = count;
+      }
+
+      if (fetchedCount !== null) {
+        setTotalCount(fetchedCount);
       }
 
       // Fallback to mock data in development if database is empty
-      if (import.meta.env.DEV && (!data || data.length === 0)) {
+      if (import.meta.env.DEV && (!fetchedData || fetchedData.length === 0)) {
         return [
           {
             id: "mock-1",
@@ -162,7 +185,7 @@ export default function EventsPage() {
         ];
       }
 
-      return data;
+      return (fetchedData || []) as unknown as EventItem[];
     },
   });
 
@@ -196,13 +219,13 @@ export default function EventsPage() {
     if (queryData) {
       setEvents(queryData);
       setPage(0);
-      if (queryData.length < PAGE_SIZE) {
+      if (searchQuery.trim() || queryData.length < PAGE_SIZE) {
         setHasMore(false);
       } else {
         setHasMore(true);
       }
     }
-  }, [queryData]);
+  }, [queryData, searchQuery]);
 
   const handleLoadMore = async () => {
     if (isLoadingMore || !hasMore) return;
