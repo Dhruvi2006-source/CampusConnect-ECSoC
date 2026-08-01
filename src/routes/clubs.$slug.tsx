@@ -1,14 +1,32 @@
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import { RoleBadge } from "@/components/RoleBadge";
 import { SiteShell } from "@/components/site/SiteShell";
 import { useQuery, useMutation } from "@/hooks/useReactQueryReplacement";
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
-import { User } from "@supabase/supabase-js";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
+import { parse } from "@/lib/markdown";
+import type { MarkdownNodeChild, HeadingNode } from "@/lib/markdown";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Github } from "lucide-react";
+import { getPresenceBadgeClass, usePresence } from "@/hooks/usePresence";
+import { ArrowLeft, Github, Loader2, CheckCircle, Flag } from "lucide-react";
+import { ReportDialog } from "@/components/ReportDialog";
+import { EmptyState } from "@/components/EmptyState";
+import { VideoPlayer } from "@/components/VideoPlayer";
+import { AudioReactiveBackground } from "@/components/media/AudioReactiveBackground";
+import LazyHydrate from "@/components/LazyHydrate";
+import { NotFound } from "@/components/NotFound";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +38,37 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { createClubProfileQueryOptions } from "@/lib/clubProfileQuery";
+import { ClubHeader } from "@/components/Clubs/ClubHeader";
+import { ClubJobsSection } from "@/components/Clubs/ClubJobsSection";
+
+interface ClubMemberProfile {
+  full_name: string;
+  avatar_url: string | null;
+  handle: string;
+}
+
+interface ClubMember {
+  id: string;
+  role: string;
+  status: string;
+  user_id: string;
+  profiles: ClubMemberProfile | ClubMemberProfile[];
+}
+
+interface ClubEvent {
+  id: string;
+  title: string;
+  event_date: string | null;
+}
+
+interface MemberItem {
+  name: string;
+  handle: string;
+  role: "admin" | "member" | "organizer" | "alumni";
+  avatarUrl: string | null;
+  userId: string;
+}
 
 // Small building block for the skeleton below. Deliberately a plain div
 // (not the shared ui/skeleton component) to keep this change self-contained.
@@ -35,6 +84,34 @@ function getInitials(name: string) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function extractText(children: React.ReactNode): string {
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (!children) return "";
+  if (Array.isArray(children)) return children.map(extractText).join("");
+  if (typeof children === "object" && "props" in children) {
+    const el = children as React.ReactElement<{ children?: React.ReactNode }>;
+    return extractText(el.props.children);
+  }
+  return "";
+}
+
+function extractAstText(children: MarkdownNodeChild[]): string {
+  return children
+    .map((child) => (typeof child === "string" ? child : extractAstText(child.children ?? [])))
+    .join("");
 }
 
 // Mimics the club header + events/members layout below while data is fetched
@@ -97,6 +174,7 @@ export default function ClubProfile() {
   const { slug } = useParams();
   const supabase = createClient();
   const [user, setUser] = useState<User | null>(null);
+  const { presenceMap } = usePresence(user?.id);
   const [isExpanded, setIsExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false);
@@ -115,45 +193,68 @@ export default function ClubProfile() {
   const [latestJob, setLatestJob] = useState<BulkEmailJob | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
+    supabase.auth.getUser().then(({ data }) => setUser(data?.user ?? null));
   }, [supabase]);
+
+  // Check if this club is already bookmarked
+  useEffect(() => {
+    if (!user || !club) return;
+    supabase
+      .from("bookmarks")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("club_id", club.id)
+      .maybeSingle()
+      .then(({ data }) => setIsClubBookmarked(!!data));
+  }, [user, club, supabase]);
+
+  const handleClubBookmark = async () => {
+    if (!user) return void toast.error("Please sign in first");
+    if (!club) return;
+    setBookmarkPending(true);
+    const next = !isClubBookmarked;
+    setIsClubBookmarked(next); // optimistic
+    try {
+      await toggleBookmark(user.id, "club", club.id, !next);
+      toast.success(next ? "Club bookmarked!" : "Bookmark removed.");
+    } catch {
+      setIsClubBookmarked(!next); // revert
+      toast.error("Failed to update bookmark.");
+    } finally {
+      setBookmarkPending(false);
+    }
+  };
 
   const {
     data: club,
     isLoading,
+    error,
     refetch,
   } = useQuery({
-    queryKey: ["club", slug],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("clubs")
-        .select(
-          `
-          id, name, slug, description, github_repo_url,
-          club_members (id, role, status, user_id, profiles (full_name, avatar_url, handle)),
-          events (id, title, event_date)
-        `,
-        )
-        .eq("slug", slug)
-        .eq("status", "approved")
-        .single();
-      return data;
-    },
+    ...createClubProfileQueryOptions(supabase, slug ?? ""),
+    enabled: Boolean(slug),
   });
 
   const joinMutation = useMutation({
     mutationFn: async () => {
       if (!user || !club) throw new Error("Must be logged in");
-      await supabase.from("club_members").insert({
+      const isPublic = (club as { visibility?: string }).visibility === "public";
+      const { error } = await supabase.from("club_members").insert({
         club_id: club.id,
         user_id: user.id,
-        status: "pending",
+        status: isPublic ? "approved" : "pending",
       });
+      if (error) throw error;
+      return { isPublic };
     },
-    onSuccess: () => {
+    onSuccess: ({ isPublic }) => {
       setIsJoinDialogOpen(false);
-      toast.success("Join request submitted!");
+      setJoinSuccess(true);
+      toast.success(isPublic ? "You have joined the club!" : "Join request submitted!");
       refetch();
+      if (!isPublic) {
+        setTimeout(() => setJoinSuccess(false), 2000);
+      }
     },
     onError: () => {
       toast.error("Failed to submit join request. Please try again.");
@@ -235,7 +336,47 @@ export default function ClubProfile() {
     },
   });
 
-  if (isLoading) return <ClubProfileSkeleton />;
+  const leaveMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !club) throw new Error("Must be logged in");
+      const { error } = await supabase
+        .from("club_members")
+        .delete()
+        .match({ club_id: club.id, user_id: user.id });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("You have left the club.");
+      refetch();
+    },
+    onError: () => {
+      toast.error("Failed to leave club. Please try again.");
+    },
+  });
+
+  const headings = useMemo(() => {
+    if (!club?.description) return [];
+    const ast = parse(club.description);
+    return ast.children
+      .filter((node): node is HeadingNode => node.type === "heading" && node.depth <= 3)
+      .map((node) => ({
+        id: slugify(extractAstText(node.children)),
+        text: extractAstText(node.children),
+        depth: node.depth,
+      }))
+      .filter((h) => h.id);
+  }, [club?.description]);
+
+  if (isLoading) {
+    return (
+      <SiteShell>
+        <div className="flex h-[50vh] w-full items-center justify-center p-8">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      </SiteShell>
+    );
+  }
+  if (error || !club) return <NotFound />;
   if (!club)
     return (
       <SiteShell>
@@ -244,19 +385,20 @@ export default function ClubProfile() {
     );
 
   const members = Array.isArray(club.club_members)
-    ? club.club_members.filter((m) => m.status === "approved")
+    ? club.club_members.filter((m: ClubMember) => m.status === "approved")
     : [];
-  const memberList = members.map((m) => {
+  const memberList = members.map((m: ClubMember) => {
     const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
     return {
       name: profile?.full_name || "Unknown User",
       handle: profile?.handle || "",
       role: m.role as "admin" | "member" | "organizer" | "alumni",
       avatarUrl: profile?.avatar_url || null,
+      userId: m.user_id,
     };
   });
 
-  const filteredMembers = memberList.filter((m) => {
+  const filteredMembers = memberList.filter((m: MemberItem) => {
     const query = searchQuery.toLowerCase();
     return m.name.toLowerCase().includes(query) || m.handle.toLowerCase().includes(query);
   });
@@ -265,148 +407,414 @@ export default function ClubProfile() {
 
   const events = Array.isArray(club.events) ? club.events : [];
 
-  return (
-    <SiteShell>
-      <section className="border-b-2 border-black px-4 py-14 md:px-6">
-        <div className="mx-auto max-w-6xl">
-          <p className="eyebrow font-bold text-blue-900">Club</p>
-          <h1 className="mt-2 text-5xl font-bold text-[#123a57] md:text-7xl">{club.name}</h1>
-          <div className="markdown-content mt-4 max-w-2xl font-mono text-sm md:text-base leading-relaxed">
-            <ReactMarkdown>{club.description || ""}</ReactMarkdown>
-          </div>
+  const clubName = club.name || "Club";
+  const clubDescription = (
+    club.description
+      ? club.description.replace(/[#*_`>[\]()~-]/g, "").trim()
+      : "Check out this club on CampusConnect."
+  ).slice(0, 160);
+  const currentUrl = typeof window !== "undefined" ? window.location.href : "";
+  const copyInvite = async () => {
+    const invite = `# ${club.name}
 
-          {/* Members section below the description */}
-          <div className="mt-8 max-w-2xl">
-            <h3 className="font-display text-lg font-bold text-blue-900">Members</h3>
-            <p className="font-mono text-xs text-black mt-1 mb-3">
-              {memberList.length} members total
-            </p>
-            {memberList.length === 0 ? (
-              <p className="font-mono text-sm text-black">No members yet.</p>
-            ) : (
-              <>
-                <div className="mb-4">
-                  <input
-                    type="text"
-                    placeholder="Search members by name or handle..."
-                    aria-label="Search members by name or handle"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full border-2 border-black bg-white px-3 py-2 font-mono text-sm outline-none focus:bg-lime/10"
-                  />
-                </div>
-                {filteredMembers.length === 0 ? (
-                  <p className="font-mono text-sm text-gray-700">No members match your search.</p>
-                ) : (
-                  <>
-                    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {displayedMembers.map((m, i) => (
-                        <li
-                          key={i}
-                          className="neu-border bg-white flex items-center gap-3 p-3 font-mono text-sm"
-                        >
-                          <Avatar className="h-10 w-10 border-2 border-black rounded-full">
-                            <AvatarImage
-                              src={m.avatarUrl || undefined}
-                              alt={m.name}
-                              className="rounded-full"
-                            />
-                            <AvatarFallback className="rounded-full bg-[#bce3f2] text-black font-bold">
-                              {getInitials(m.name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold truncate" title={m.name}>
-                              {m.name}
-                            </p>
-                            {m.handle && (
-                              <p
-                                className="text-xs text-gray-500 dark:text-gray-300 truncate"
-                                title={`@${m.handle}`}
-                              >
-                                @{m.handle}
-                              </p>
-                            )}
-                          </div>
-                          <RoleBadge role={m.role} />
-                        </li>
-                      ))}
-                    </ul>
-                    {filteredMembers.length > 10 && (
-                      <button
-                        onClick={() => setIsExpanded(!isExpanded)}
-                        className="neu-border neu-press mt-4 bg-cream px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider hover:bg-black hover:text-cream transition-colors"
-                      >
-                        {isExpanded ? "View less" : "View all"}
-                      </button>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-          </div>
+  ${club.description || "Join this club on CampusConnect."}
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            <AlertDialog open={isJoinDialogOpen} onOpenChange={setIsJoinDialogOpen}>
-              <AlertDialogTrigger asChild>
-                <button
-                  onClick={() => {
-                    if (!user) return void toast.error("Please sign in first");
-                    setIsJoinDialogOpen(true);
-                  }}
-                  disabled={!!membership || joinMutation.isPending}
-                  className={`neu-border neu-press px-5 py-2 font-mono text-xs font-bold uppercase tracking-wider ${membership ? "bg-gray-300 cursor-not-allowed" : "bg-black text-cream"}`}
-                >
-                  {membership
-                    ? membership.status === "pending"
-                      ? "Request Pending"
-                      : "Member ✓"
-                    : "Join club"}
-                </button>
-              </AlertDialogTrigger>
-              <AlertDialogContent className="neu-border bg-white rounded-none p-6">
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="font-display text-xl font-bold">
-                    Submit join request?
-                  </AlertDialogTitle>
-                  <AlertDialogDescription className="font-mono text-sm text-gray-700">
-                    Do you want to submit a join request?
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter className="mt-4 gap-2 sm:gap-0">
-                  <AlertDialogCancel className="neu-border rounded-none font-mono text-xs font-bold uppercase bg-white text-black hover:bg-cream">
-                    Cancel
-                  </AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={(e) => {
-                      e.preventDefault();
-                      joinMutation.mutate();
-                    }}
-                    disabled={joinMutation.isPending}
-                    className="neu-border bg-black text-cream hover:bg-cream hover:text-black rounded-none font-mono text-xs font-bold uppercase disabled:opacity-50"
-                  >
-                    {joinMutation.isPending ? "Submitting..." : "Confirm"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-            <button
-              onClick={() => toast.info("Follow feature coming soon!")}
-              className="neu-border neu-press bg-cream px-5 py-2 font-mono text-xs font-bold uppercase tracking-wider"
+  Join here: ${currentUrl}`;
+
+    try {
+      await navigator.clipboard.writeText(invite);
+      toast.success("Markdown invite copied!");
+    } catch {
+      toast.error("Failed to copy invite.");
+    }
+  };
+
+  // Renders the primary membership action (Join / Leave / Pending / Joined).
+  // Shared by the sticky ClubHeader so the button can shrink alongside the
+  // rest of the header once the user scrolls past the threshold.
+  const renderJoinAction = (isCompact: boolean) => {
+    const sizeClasses = isCompact ? "px-3 py-1.5 text-[10px]" : "px-5 py-2 text-xs";
+
+    if (membership?.status === "approved") {
+      return (
+        <button
+          onClick={() => {
+            if (!user) return void toast.error("Please sign in first");
+            leaveMutation.mutate();
+          }}
+          disabled={leaveMutation.isPending}
+          className={`neu-border neu-press inline-flex items-center gap-2 bg-gray-200 font-mono font-bold uppercase tracking-wider hover:bg-red-100 disabled:opacity-50 transition-all duration-300 ${sizeClasses}`}
+        >
+          {leaveMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Leave Club
+        </button>
+      );
+    }
+
+    if (membership?.status === "pending") {
+      return (
+        <button
+          disabled
+          className={`neu-border font-mono font-bold uppercase tracking-wider bg-gray-300 cursor-not-allowed transition-all duration-300 ${sizeClasses}`}
+        >
+          Request Pending
+        </button>
+      );
+    }
+
+    if (joinSuccess) {
+      return (
+        <button
+          disabled
+          className={`neu-border inline-flex items-center gap-2 bg-lime font-mono font-bold uppercase tracking-wider transition-all duration-300 ${sizeClasses}`}
+        >
+          <CheckCircle className="h-3.5 w-3.5" />
+          Member ✓
+        </button>
+      );
+    }
+
+    return (
+      <AlertDialog open={isJoinDialogOpen} onOpenChange={setIsJoinDialogOpen}>
+        <AlertDialogTrigger asChild>
+          <button
+            onClick={() => {
+              if (!user) return void toast.error("Please sign in first");
+              setIsJoinDialogOpen(true);
+            }}
+            className={`neu-border neu-press inline-flex items-center gap-2 bg-black font-mono font-bold uppercase tracking-wider text-cream transition-all duration-300 ${sizeClasses}`}
+          >
+            Join Club
+          </button>
+        </AlertDialogTrigger>
+        <AlertDialogContent className="neu-border bg-white rounded-none p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-display text-xl font-bold">
+              Submit join request?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="font-mono text-sm text-gray-700">
+              Do you want to submit a join request?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-4 gap-2 sm:gap-0">
+            <AlertDialogCancel className="neu-border rounded-none font-mono text-xs font-bold uppercase bg-white text-black hover:bg-cream">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.preventDefault();
+                joinMutation.mutate();
+              }}
+              disabled={joinMutation.isPending}
+              className="neu-border bg-black text-cream hover:bg-cream hover:text-black rounded-none font-mono text-xs font-bold uppercase disabled:opacity-50 inline-flex items-center gap-2"
             >
-              Follow
-            </button>
-            {club.github_repo_url && (
-              <a
-                href={club.github_repo_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="neu-border neu-press inline-flex items-center gap-2 bg-white px-5 py-2 font-mono text-xs font-bold uppercase tracking-wider hover:bg-lime/20"
-              >
-                <Github className="h-4 w-4" />
-                GitHub Repo
-              </a>
+              {joinMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {joinMutation.isPending ? "Submitting..." : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  };
+
+  return (
+    <>
+      <Helmet>
+        <title>{clubName} | CampusConnect</title>
+        <meta name="description" content={clubDescription} />
+
+        {/* OpenGraph / Social Embed Meta Tags */}
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={currentUrl} />
+        <meta property="og:title" content={clubName} />
+        <meta property="og:description" content={clubDescription} />
+
+        {/* Twitter Card Tags */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={clubName} />
+        <meta name="twitter:description" content={clubDescription} />
+      </Helmet>
+
+      <SiteShell>
+        {/* Breadcrumb — full on sm+, back-link only on mobile. Scrolls away
+            normally above the sticky ClubHeader. */}
+        <div className="border-b-2 border-black bg-slate-950 px-4 pt-4 md:px-6">
+          <div className="mx-auto max-w-6xl">
+            <Link
+              to="/clubs"
+              className="mb-4 inline-flex items-center gap-1 font-mono text-xs font-bold uppercase tracking-wider text-cream hover:underline sm:hidden"
+            >
+              <ArrowLeft size={12} /> Clubs
+            </Link>
+            <Breadcrumb className="hidden sm:block mb-4">
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to="/" className="font-mono text-xs font-bold uppercase text-cream">
+                      Home
+                    </Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="text-cream" />
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to="/clubs" className="font-mono text-xs font-bold uppercase text-cream">
+                      Clubs
+                    </Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="text-cream" />
+                <BreadcrumbItem>
+                  <BreadcrumbPage className="font-mono text-xs font-bold uppercase text-cream">
+                    {club.name}
+                  </BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        </div>
+
+        {/* Sticky header: shrinks the massive banner/logo away and pins the
+            club name + Join button to the top as the user scrolls the feed. */}
+        <ClubHeader
+          clubName={club.name}
+          logoInitials={getInitials(club.name)}
+          eyebrow={<p className="eyebrow font-bold text-blue-900">Club</p>}
+          banner={
+            <AudioReactiveBackground
+              className="h-64 md:h-80 border-2 border-black rounded-lg shadow-xl"
+              defaultPreset="neonPulse"
+              interactive={true}
+            />
+          }
+          secondaryActions={
+            <>
+              {membership && (
+                <Link
+                  to={`/clubs/${club.slug}/tasks`}
+                  className="neu-border neu-press bg-brand-blue-base text-white px-5 py-3 font-mono text-sm font-bold uppercase transition-transform hover:-translate-y-1 inline-block shrink-0 text-center"
+                >
+                  Tasks
+                </Link>
+              )}
+              {membership && (
+                <Link
+                  to={`/clubs/${club.slug}/notes`}
+                  className="neu-border neu-press bg-lime px-5 py-3 font-mono text-sm font-bold uppercase transition-transform hover:-translate-y-1 inline-block shrink-0 text-center"
+                >
+                  Meeting Notes
+                </Link>
+              )}
+              {membership?.role === "admin" && (
+                <Link
+                  to={`/clubs/${club.slug}/manage`}
+                  className="neu-border neu-press bg-brand-yellow-base px-5 py-3 font-mono text-sm font-bold uppercase transition-transform hover:-translate-y-1 inline-block shrink-0 text-center"
+                >
+                  Manage Club
+                </Link>
+              )}
+            </>
+          }
+          actions={renderJoinAction}
+        />
+
+        <section className="relative border-b-2 border-black px-4 pb-8 md:px-6 bg-slate-950 overflow-hidden">
+          <div className="mx-auto max-w-6xl">
+            <div className="markdown-content mt-4 max-w-2xl font-mono text-sm md:text-base leading-relaxed border-b-2 border-black pb-6">
+              {headings.length > 1 && (
+                <nav
+                  className="mb-4 border-2 border-black bg-cream p-4"
+                  aria-label="Table of contents"
+                >
+                  <p className="font-bold text-xs uppercase tracking-wider mb-2">
+                    Table of Contents
+                  </p>
+                  <ul className="space-y-1">
+                    {headings.map((h) => (
+                      <li key={h.id} style={{ paddingLeft: (h.depth - 1) * 16 }}>
+                        <a
+                          href={`#${h.id}`}
+                          onClick={(e) => handleTocClick(e, h.id)}
+                          className="text-blue-900 underline hover:text-black"
+                        >
+                          {h.text}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </nav>
+              )}
+              <ReactMarkdown components={mdComponents}>{club.description || ""}</ReactMarkdown>
+            </div>
+
+            {club.promo_video_url && (
+              <div className="mt-8 max-w-2xl">
+                <h3 className="font-display text-xl font-bold text-indigo-900 uppercase tracking-tight">
+                  Featured Club Promo
+                </h3>
+                <div className="neu-border bg-black aspect-video mt-4 overflow-hidden">
+                  <LazyHydrate height="360px">
+                    <VideoPlayer src={club.promo_video_url} title="Club Promo" />
+                  </LazyHydrate>
+                </div>{" "}
+              </div>
             )}
+
+            {/* Members section below the description */}
+            <div className="mt-8 max-w-2xl">
+              <h3 className="font-display text-lg font-bold text-blue-900">Members</h3>
+              <p className="font-mono text-xs text-black mt-1 mb-3">
+                {memberList.length} members total
+              </p>
+              {memberList.length === 0 ? (
+                <EmptyState
+                  illustration="no-members"
+                  title="No members yet."
+                  description="Be the first to join this club and help it grow."
+                />
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <input
+                      type="text"
+                      placeholder="Search members by name or handle..."
+                      aria-label="Search members by name or handle"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full border-2 border-black bg-white px-3 py-2 font-mono text-sm outline-none focus:bg-lime/10"
+                    />
+                  </div>
+                  {filteredMembers.length === 0 ? (
+                    <EmptyState illustration="no-results" title="No members match your search." />
+                  ) : (
+                    <>
+                      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {displayedMembers.map((m: MemberItem, i: number) => (
+                          <li
+                            key={m.handle || `${m.name}-${i}`}
+                            className="neu-border bg-white flex items-center gap-3 p-3 font-mono text-sm"
+                          >
+                            {m.handle ? (
+                              <Link
+                                to={`/profile/${m.handle}`}
+                                className="relative h-10 w-10 shrink-0"
+                              >
+                                <Avatar className="h-10 w-10 border-2 border-black rounded-full transition-transform hover:scale-105">
+                                  <AvatarImage
+                                    src={m.avatarUrl || undefined}
+                                    alt={m.name}
+                                    className="rounded-full"
+                                  />
+                                  <AvatarFallback className="rounded-full bg-brand-blue-light text-black font-bold">
+                                    {getInitials(m.name)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span className="absolute bottom-0 right-0 rounded-full border-2 border-white bg-white p-0.5">
+                                  <span
+                                    className={getPresenceBadgeClass(
+                                      presenceMap[m.userId]?.status ?? "offline",
+                                    )}
+                                    aria-hidden="true"
+                                  />
+                                </span>
+                              </Link>
+                            ) : (
+                              <div className="relative h-10 w-10 shrink-0">
+                                <Avatar className="h-10 w-10 border-2 border-black rounded-full">
+                                  <AvatarImage
+                                    src={m.avatarUrl || undefined}
+                                    alt={m.name}
+                                    className="rounded-full"
+                                  />
+                                  <AvatarFallback className="rounded-full bg-brand-blue-light text-black font-bold">
+                                    {getInitials(m.name)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <span className="absolute bottom-0 right-0 rounded-full border-2 border-white bg-white p-0.5">
+                                  <span
+                                    className={getPresenceBadgeClass(
+                                      presenceMap[m.userId]?.status ?? "offline",
+                                    )}
+                                    aria-hidden="true"
+                                  />
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              {m.handle ? (
+                                <Link to={`/profile/${m.handle}`} className="hover:underline">
+                                  <p className="font-bold truncate" title={m.name}>
+                                    {m.name}
+                                  </p>
+                                </Link>
+                              ) : (
+                                <p className="font-bold truncate" title={m.name}>
+                                  {m.name}
+                                </p>
+                              )}
+                              {m.handle && (
+                                <p
+                                  className="text-xs text-gray-500 dark:text-gray-300 truncate"
+                                  title={`@${m.handle}`}
+                                >
+                                  @{m.handle}
+                                </p>
+                              )}
+                            </div>
+                            <RoleBadge role={m.role} />
+                          </li>
+                        ))}
+                      </ul>
+                      {filteredMembers.length > 10 && (
+                        <button
+                          onClick={() => setIsExpanded(!isExpanded)}
+                          className="neu-border neu-press mt-4 bg-cream px-4 py-2 font-mono text-xs font-bold uppercase tracking-wider hover:bg-black hover:text-cream transition-colors"
+                        >
+                          {isExpanded ? "View less" : "View all"}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              {/* Join/Leave lives in the sticky ClubHeader now, so it's
+                  always reachable — no need to duplicate it here. */}
+              <button
+                onClick={handleClubBookmark}
+                disabled={bookmarkPending}
+                className="neu-border neu-press inline-flex items-center gap-2 bg-white px-5 py-2 font-mono text-xs font-bold uppercase tracking-wider hover:bg-lime disabled:opacity-50"
+              >
+                <Bookmark className="h-3.5 w-3.5" fill={isClubBookmarked ? "black" : "none"} />
+                {isClubBookmarked ? "Bookmarked" : "Bookmark"}
+              </button>
+              <button
+                onClick={() => toast.info("Follow feature coming soon!")}
+                className="neu-border neu-press bg-cream px-5 py-2 font-mono text-xs font-bold uppercase tracking-wider"
+              >
+                Follow
+              </button>
+              <button
+                onClick={() => setIsReportDialogOpen(true)}
+                className="neu-border neu-press bg-white hover:bg-peach px-5 py-2 font-mono text-xs font-bold uppercase tracking-wider inline-flex items-center gap-1.5"
+              >
+                <Flag size={12} />
+                Report
+              </button>
+              {club.github_repo_url && (
+                <a
+                  href={club.github_repo_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="neu-border neu-press inline-flex items-center gap-2 bg-white px-5 py-2 font-mono text-xs font-bold uppercase tracking-wider hover:bg-lime/20"
+                >
+                  <Github className="h-4 w-4" />
+                  GitHub Repo
+                </a>
+              )}
+            </div>
           </div>
 
           {isAdmin && (
@@ -490,8 +898,14 @@ export default function ClubProfile() {
               </ul>
             )}
           </div>
-        </div>
-      </section>
-    </SiteShell>
+        </section>
+        <ReportDialog
+          isOpen={isReportDialogOpen}
+          onClose={() => setIsReportDialogOpen(false)}
+          targetType="club"
+          targetId={club.id}
+        />
+      </SiteShell>
+    </>
   );
 }
