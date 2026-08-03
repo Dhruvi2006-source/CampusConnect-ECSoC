@@ -40,6 +40,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { CollaborativeEditor } from "@/components/notes/CollaborativeEditor";
 import { createClubProfileQueryOptions } from "@/lib/clubProfileQuery";
 import { ClubHeader } from "@/components/Clubs/ClubHeader";
 import { ClubJobsSection } from "@/components/Clubs/ClubJobsSection";
@@ -188,6 +189,12 @@ export default function ClubProfile() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isJoinDialogOpen, setIsJoinDialogOpen] = useState(false);
+  const [joinSuccess, setJoinSuccess] = useState(false);
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+  const [isClubBookmarked, setIsClubBookmarked] = useState(false);
+  const [bookmarkPending, setBookmarkPending] = useState(false);
+  const { setLabel } = useBreadcrumbs();
+
   interface BulkEmailJob {
     id: string;
     club_id: string;
@@ -653,6 +660,23 @@ export default function ClubProfile() {
                     </div>
                   )}
 
+          {user && membership && membership.status === "approved" && (
+            <div className="mt-12 max-w-2xl">
+              <h3 className="font-display text-xl font-bold text-indigo-900 uppercase tracking-tight mb-4">
+                Collaborative Group Notes
+              </h3>
+              <div className="neu-border bg-white p-6">
+                <CollaborativeEditor
+                  groupId={club.id}
+                  user={{
+                    id: user.id,
+                    name: user.user_metadata?.full_name || user.email || "Member",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
                   {/* Members section below the description */}
                   <div className="mt-8 max-w-2xl">
                     <h3 className="font-display text-lg font-bold text-blue-900">Members</h3>
@@ -902,5 +926,6 @@ export default function ClubProfile() {
         </AnimatePresence>
       </SiteShell>
     </>
+>>>>>>> upstream/main
   );
 }
