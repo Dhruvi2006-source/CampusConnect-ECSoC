@@ -33,7 +33,7 @@ function copyWithLegacyFallback(text: string): boolean {
   }
 }
 
-export function useCopyToClipboard() {
+export function useCopyToClipboard(timeout = 2000) {
   const [isCopied, setIsCopied] = useState(false);
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -45,31 +45,37 @@ export function useCopyToClipboard() {
     };
   }, []);
 
-  const copyToClipboard = useCallback(async (text: string): Promise<boolean> => {
-    let didCopy = false;
+  const copyToClipboard = useCallback(
+    async (text: string): Promise<boolean> => {
+      let didCopy = false;
 
-    if (typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function") {
-      try {
-        await navigator.clipboard.writeText(text);
-        didCopy = true;
-      } catch {
+      if (
+        typeof navigator !== "undefined" &&
+        typeof navigator.clipboard?.writeText === "function"
+      ) {
+        try {
+          await navigator.clipboard.writeText(text);
+          didCopy = true;
+        } catch {
+          didCopy = copyWithLegacyFallback(text);
+        }
+      } else {
         didCopy = copyWithLegacyFallback(text);
       }
-    } else {
-      didCopy = copyWithLegacyFallback(text);
-    }
 
-    if (!didCopy) {
-      return false;
-    }
+      if (!didCopy) {
+        return false;
+      }
 
-    setIsCopied(true);
-    if (resetTimeoutRef.current) {
-      clearTimeout(resetTimeoutRef.current);
-    }
-    resetTimeoutRef.current = setTimeout(() => setIsCopied(false), COPIED_DURATION_MS);
-    return true;
-  }, []);
+      setIsCopied(true);
+      if (resetTimeoutRef.current) {
+        clearTimeout(resetTimeoutRef.current);
+      }
+      resetTimeoutRef.current = setTimeout(() => setIsCopied(false), timeout);
+      return true;
+    },
+    [timeout],
+  );
 
   return { copyToClipboard, isCopied };
 }

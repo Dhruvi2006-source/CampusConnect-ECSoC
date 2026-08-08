@@ -12,7 +12,12 @@ import { EventCardSkeleton } from "@/components/EventCardSkeleton";
 import { Search, Loader2, Calendar as CalendarIcon, Download, MapPin } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonths } from "date-fns";
+import format from "date-fns/format";
+import startOfWeek from "date-fns/startOfWeek";
+import endOfWeek from "date-fns/endOfWeek";
+import startOfMonth from "date-fns/startOfMonth";
+import endOfMonth from "date-fns/endOfMonth";
+import addMonths from "date-fns/addMonths";
 import { matchesDateFilter } from "@/lib/eventUtils";
 import { getMultiIcsContent } from "@/lib/utils";
 import { Link } from "react-router-dom";
@@ -42,8 +47,12 @@ export interface EventItem {
   end_date?: string | null;
   location: string | null;
   banner_url?: string | null;
+  announce_date?: string | null;
   created_at?: string | null;
-  clubs: { name: string } | { name: string }[] | null;
+  clubs:
+    | { name: string; average_lead_time_days?: number | null }
+    | { name: string; average_lead_time_days?: number | null }[]
+    | null;
   event_rsvps: { id: string; user_id: string }[] | null;
   saved_events: { id: string; user_id: string }[] | null;
   rsvp_count?: number;
@@ -181,16 +190,11 @@ export default function EventsList() {
       let fetchedCount: number | null = null;
 
       if (searchQuery.trim()) {
-        const { data, error } = await supabase
-          .rpc("search_events_advanced", { query_string: searchQuery })
-          .select(
-            `
-            id, title, description, event_date, start_date, end_date, location, banner_url, created_at, max_attendees,
-            clubs (name),
-            event_rsvps(count),
-            saved_events(count)
-          `,
-          );
+        const { data, error } = await supabase.functions.invoke("global-search", {
+          body: {
+            query: searchQuery,
+          },
+        });
         if (error) throw error;
         const results = (data || []) as unknown[];
         fetchedData = results;
@@ -200,8 +204,8 @@ export default function EventsList() {
           .from("events")
           .select(
             `
-            id, title, description, event_date, start_date, end_date, location, banner_url, created_at, max_attendees,
-            clubs (name),
+            id, title, description, event_date, start_date, end_date, location, banner_url, created_at, announce_date, max_attendees,
+            clubs (name, average_lead_time_days),
             event_rsvps(count),
             saved_events(count)
           `,
@@ -320,6 +324,40 @@ export default function EventsList() {
       }
 
       return (fetchedData || []) as unknown as EventItem[];
+    },
+  });
+
+  const { data: trendingEvents, isLoading: isTrendingLoading } = useQuery({
+    queryKey: ["trendingEvents"],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("trending-events");
+        if (error) throw error;
+
+        const uuids = data?.events || [];
+        if (!uuids || uuids.length === 0) return [];
+
+        const { data: eventsData, error: dbError } = await supabase
+          .from("events")
+          .select(
+            `
+            id, title, description, event_date, start_date, end_date, location, banner_url, created_at, max_attendees,
+            clubs (name),
+            event_rsvps(count),
+            saved_events(count)
+          `,
+          )
+          .in("id", uuids);
+
+        if (dbError) throw dbError;
+
+        return (eventsData as unknown as EventItem[]).sort((a, b) => {
+          return uuids.indexOf(a.id) - uuids.indexOf(b.id);
+        });
+      } catch (err) {
+        console.error("Failed to load trending events:", err);
+        return [];
+      }
     },
   });
 
@@ -476,7 +514,7 @@ export default function EventsList() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [isLoadingMore, hasMore, page, supabase]);
+  }, [isLoadingMore, hasMore, page, supabase, filters, user]);
 
   // Infinite scroll: auto-trigger load when sentinel enters the viewport
   useEffect(() => {
@@ -667,7 +705,6 @@ export default function EventsList() {
 
       // Show confetti only when successfully RSVPing (not when cancelling)
       if (!hasRsvpd) {
-        // @ts-expect-error - canvas-confetti lacks type declarations
         import("canvas-confetti")
           .then((m) => {
             const fireConfetti = m.default || m;
@@ -1078,7 +1115,50 @@ export default function EventsList() {
               <section className="bg-cream px-4 py-12 md:px-6">
                 {viewMode === "list" ? (
                   <>
+ feat/redis-trending-scores-2005
+                    {(isTrendingLoading || (trendingEvents && trendingEvents.length > 0)) &&
+                      filter === "All" &&
+                      !searchQuery && (
+                        <div className="mx-auto max-w-7xl mb-12">
+                          <div className="flex items-center gap-2 mb-6">
+                            <h2 className="text-2xl font-bold font-display">Trending Now</h2>
+                            <span className="text-xl">🔥</span>
+                          </div>
+                          <div className="flex gap-4 overflow-x-auto pb-4 snap-x hide-scrollbar">
+                            {isTrendingLoading
+                              ? Array.from({ length: 4 }).map((_, i) => (
+                                  <div
+                                    key={`trending-skel-${i}`}
+                                    className="min-w-[300px] md:min-w-[350px] snap-start"
+                                  >
+                                    <EventCardSkeleton index={i} />
+                                  </div>
+                                ))
+                              : trendingEvents?.map((e, index) => (
+                                  <div
+                                    key={`trending-${e.id}`}
+                                    className="min-w-[300px] md:min-w-[350px] snap-start"
+                                  >
+                                    <EventCard
+                                      event={e}
+                                      index={index}
+                                      user={user}
+                                      active={e.id === eventId}
+                                      onRsvpToggle={handleRsvpToggle}
+                                      isRsvpPending={toggleRsvp.isPending}
+                                      onBookmarkToggle={handleBookmarkToggle}
+                                      isBookmarkPending={toggleBookmark.isPending}
+                                    />
+                                  </div>
+                                ))}
+                          </div>
+                        </div>
+                      )}
+
+                    <div className="mx-auto grid max-w-7xl gap-6 md:grid-cols-2 lg:grid-cols-3">
+
                     <AnimatePresence mode="sync">
+ main
                       {isLoading ? (
                         <motion.div
                           key="events-loading-skeletons"

@@ -3,72 +3,37 @@ import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
-import svgr from "vite-plugin-svgr";
 import { fileURLToPath } from "url";
-import { federation } from "@module-federation/vite";
+import { copyLibFiles } from "@builder.io/partytown/utils";
+import { partytownSnippet } from "@builder.io/partytown/integration";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function lucideImportOptimizer() {
+function partytownPlugin() {
   return {
-    name: "lucide-import-optimizer",
-    transform(code: string, id: string) {
-      if (!id.includes("/src/") || !/\.[jt]sx?$/.test(id)) {
-        return null;
-      }
-
-      // Matches imports like: import { ... } from "lucide-react";
-      // Excludes "import type { ... }" by checking negative lookahead (?!type\s+)
-      const regex = /import\s+(?!type\s+)\{([\s\S]*?)\}\s+from\s+['"]lucide-react['"];?/g;
-
-      let hasChanged = false;
-      const newCode = code.replace(regex, (match, specifiers) => {
-        if (!specifiers) return match;
-
-        const icons = specifiers
-          .split(",")
-          .map((s: string) => s.trim())
-          .filter(Boolean);
-
-        const newImports = icons.map((icon: string) => {
-          let iconName = icon;
-          let aliasName = icon;
-
-          if (icon.includes(" as ")) {
-            const parts = icon.split(" as ");
-            iconName = parts[0].trim();
-            aliasName = parts[1].trim();
-          }
-
-          if (iconName.startsWith("type ")) {
-            const cleanTypeName = iconName.slice(5).trim();
-            return `import type { ${cleanTypeName} } from 'lucide-react';`;
-          }
-
-          // Map camelCase/PascalCase to kebab-case
-          const kebabName = iconName
-            .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-            .replace(/([a-zA-Z])([0-9])/g, "$1-$2")
-            .toLowerCase();
-
-          return `import ${aliasName} from 'lucide-react/dist/esm/icons/${kebabName}';`;
-        });
-
-        hasChanged = true;
-        return newImports.join("\n");
-      });
-
-      if (hasChanged) {
-        return {
-          code: newCode,
-          map: null,
-        };
-      }
-      return null;
+    name: "partytown-plugin",
+    async buildStart() {
+      await copyLibFiles(path.resolve(__dirname, "public/~partytown"));
+    },
+    transformIndexHtml(html: string) {
+      return html.replace(
+        "<head>",
+        `<head>
+    <script>
+      window.partytown = {
+        lib: "/~partytown/",
+        forward: ["dataLayer.push", "fbq"]
+      };
+    </script>
+    <script>${partytownSnippet()}</script>`,
+      );
     },
   };
 }
+
+const CSP_VALUE =
+  "default-src 'self'; script-src 'self' 'unsafe-inline' https://js.stripe.com https://www.google-analytics.com https://www.googletagmanager.com https://connect.facebook.net https://*.hotjar.com https://script.hotjar.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https: https://www.facebook.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.supabase.co https://s3.amazonaws.com https://images.unsplash.com https://www.google-analytics.com https://www.googletagmanager.com https://connect.facebook.net https://*.hotjar.com https://script.hotjar.com https://vars.hotjar.com; frame-src 'self' https://js.stripe.com https://vars.hotjar.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';";
 
 /**
  * Vite configuration for CampusConnect
@@ -80,14 +45,17 @@ export default defineConfig({
     port: 3000,
     host: true,
     headers: {
+      "Content-Security-Policy": CSP_VALUE,
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
   preview: {
     headers: {
+      "Content-Security-Policy": CSP_VALUE,
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",
+      "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
     },
   },
   // Ensure Vite treats .lottie and .json files as raw static assets
@@ -96,9 +64,10 @@ export default defineConfig({
   // Storybook builds — it precaches Storybook's own 3MB+ manager bundle and
   // fails on the default 2MiB workbox limit.
   plugins: [
-    lucideImportOptimizer(),
+    // lucideImportOptimizer(),
     viteReact(),
     tailwindcss(),
+    partytownPlugin(),
     ...(process.env.STORYBOOK === "true"
       ? []
       : [
@@ -170,24 +139,24 @@ export default defineConfig({
             },
           }),
         ]),
-    ...(process.env.STORYBOOK === "true"
-      ? []
-      : [
-          federation({
-            name: "host",
-            remotes: {},
-            shared: {
-              react: {
-                singleton: true,
-                requiredVersion: "^19.2.7",
-              },
-              "react-dom": {
-                singleton: true,
-                requiredVersion: "^19.2.0",
-              },
-            },
-          }),
-        ]),
+    // ...(process.env.STORYBOOK === "true"
+    //   ? []
+    //   : [
+    //       federation({
+    //         name: "host",
+    //         remotes: {},
+    //         shared: {
+    //           react: {
+    //             singleton: true,
+    //             requiredVersion: "^19.2.7",
+    //           },
+    //           "react-dom": {
+    //             singleton: true,
+    //             requiredVersion: "^19.2.0",
+    //           },
+    //         },
+    //       }),
+    //     ]),
   ],
   resolve: {
     alias: {
@@ -200,17 +169,16 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
-    chunkSizeWarningLimit: 1000,
-  },
-  build: {
     // Raises warning threshold (optional, e.g. set to 1000kB / 1MB)
     chunkSizeWarningLimit: 1000,
     // Bundler options for chunking
     rolldownOptions: {
       output: {
         manualChunks(id) {
-          // Separates third-party packages from node_modules into vendor chunks
           if (id.includes("node_modules")) {
+            if (id.includes("recharts") || id.includes("echarts") || id.includes("chart.js")) {
+              return "chunk-admin-charts";
+            }
             if (id.includes("react") || id.includes("react-dom")) {
               return "vendor-react";
             }
@@ -221,4 +189,3 @@ export default defineConfig({
     },
   },
 });
-plugins: [react(), svgr()];

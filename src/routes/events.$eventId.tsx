@@ -1,7 +1,9 @@
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useMutation, setQueryData } from "@/hooks/useReactQueryReplacement";
 import { createClient } from "@/lib/supabase/client";
-import { useState, useEffect, lazy, Suspense, useMemo } from "react";
+import { incrementEventViews } from "@/lib/supabase/events";
+import { uploadImageWithSignedUrl } from "@/lib/supabase/signedUpload";
+import { useState, useEffect, lazy, Suspense, useMemo, useRef } from "react";
 import { TableOfContents } from "@/components/events/TableOfContents";
 import { NotFound } from "@/components/NotFound";
 import LazyHydrate from "@/components/LazyHydrate";
@@ -15,7 +17,7 @@ const EventMap = lazy(() => import("@/components/EventMap").then((m) => ({ defau
 import { formatEventDateRange } from "@/lib/utils";
 import { downloadIcs, getGoogleCalendarUrl } from "@/lib/calendarUtils";
 import { EventCapacityGauge } from "@/components/events/EventCapacityGauge";
-import { formatStandardDate } from "@/utils/dateUtils";
+import { formatDateLong } from "@/lib/dateFormatter";
 import { toast } from "sonner";
 import { ShareMenu } from "@/components/ui/ShareMenu";
 import {
@@ -34,6 +36,7 @@ import {
   Star,
   HelpCircle,
   Flag,
+  Eye,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -86,6 +89,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { isCaptchaConfigured, shouldRequireCaptcha } from "@/lib/captcha";
+import { EditEventDialog } from "@/components/EditEventDialog";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { CreatePollDialog } from "@/components/polls/CreatePollDialog";
 import { ActivePoll } from "@/components/polls/ActivePoll";
@@ -127,8 +131,8 @@ function SimilarEvents({
           p_limit: 3,
         });
 
-        if (!error && data && data.length > 0) {
-          setSimilarEvents(data as SimilarEventItem[]);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          setSimilarEvents(data as unknown as SimilarEventItem[]);
           setLoading(false);
           return;
         }
@@ -137,7 +141,7 @@ function SimilarEvents({
         const { data: fallbackData, error: fallbackError } = await supabase
           .from("events")
           .select("id, title, category_id, event_date, banner_url, description")
-          .eq("category_id", categoryId)
+          .eq("category_id", categoryId!)
           .neq("id", currentEventId)
           .eq("status", "published")
           .limit(3);
@@ -189,8 +193,7 @@ function SimilarEvents({
             </h3>
             {evt.event_date && (
               <p className="font-mono text-xs text-black/60 mt-1">
-                📅 {formatStandardDate(evt.event_date)}
-                📅 {new Date(evt.event_date).toLocaleDateString()}
+                📅 {formatDateLong(evt.event_date)}
               </p>
             )}
           </Link>
@@ -208,7 +211,7 @@ function rsvpRowsToCsv(rows: { name: string; email: string; rsvp_date: string; s
   };
   const lines = [headers.join(",")];
   for (const r of rows) {
-    lines.push([r.name, r.email, formatStandardDate(r.rsvp_date), r.status].map(escape).join(","));
+    lines.push([r.name, r.email, formatDateLong(r.rsvp_date), r.status].map(escape).join(","));
   }
   return lines.join("\n");
 }
@@ -337,30 +340,14 @@ export default function EventDetailsPage() {
           );
         }, 200);
 
-        supabase.storage
-          .from("event-gallery")
-          .upload(filePath, file, {
-            cacheControl: "3600",
-            upsert: false,
-          })
-          .then(({ error }) => {
+        uploadImageWithSignedUrl("event-gallery", filePath, file)
+          .then(() => {
             clearInterval(progressInterval);
-            if (error) {
-              setUploadingFiles((prev) =>
-                prev.map((item) =>
-                  item.id === uploadItem.id
-                    ? { ...item, status: "error", progress: 0, errorMsg: error.message }
-                    : item,
-                ),
-              );
-              toast.error(`Failed to upload ${file.name}: ${error.message}`);
-            } else {
-              setUploadingFiles((prev) =>
-                prev.map((item) =>
-                  item.id === uploadItem.id ? { ...item, status: "success", progress: 100 } : item,
-                ),
-              );
-            }
+            setUploadingFiles((prev) =>
+              prev.map((item) =>
+                item.id === uploadItem.id ? { ...item, status: "success", progress: 100 } : item,
+              ),
+            );
           })
           .catch((err: unknown) => {
             clearInterval(progressInterval);
@@ -400,11 +387,12 @@ export default function EventDetailsPage() {
         .from("events")
         .select(
           `
-          id, title, description, event_date, start_date, end_date, location, banner_url, created_by, short_id, max_attendees, requires_approval,
+          id, title, description, event_date, start_date, end_date, location, banner_url, created_by, short_id, max_attendees, requires_approval, category_id, tags, version, version_vector,
           profiles (full_name, email),
           clubs (name, slug),
           event_rsvps (id, user_id, status, checked_in, rsvp_at, profiles (first_name, last_name, avatar_url)),
-          event_waitlist (id, user_id, created_at, profiles (first_name, last_name, avatar_url))
+          event_waitlist (id, user_id, created_at, profiles (first_name, last_name, avatar_url)),
+          event_metrics (views)
         `,
         )
         .or(`short_id.eq.${eventId},id.eq.${eventId}`)
@@ -503,6 +491,7 @@ export default function EventDetailsPage() {
                 : [],
             attendee_count: eventId === "mock-1" ? 1 : 0,
             profiles: { full_name: "Mock Organizer", email: "mock@example.com" },
+            event_metrics: { views: 0 },
           };
         }
         throw error;
@@ -545,6 +534,39 @@ export default function EventDetailsPage() {
       heading.id = id;
     });
   }, [event?.description]);
+
+  // Increment persistent view count in event_metrics once per page load.
+  // Skipped for mock/dev events (no real DB row).
+  //
+  // We store the canonical event UUID (event.id) rather than a boolean so that:
+  // - Short-id URLs resolve to their UUID before incrementing (avoids wrong PK)
+  // - Navigating between events while the component stays mounted still
+  //   increments each new event exactly once
+  const viewIncrementedRef = useRef<string | null>(null);
+  useEffect(() => {
+    // Wait until the query has resolved and we have the canonical UUID
+    const canonicalId = (event as any)?.id as string | undefined;
+    if (!canonicalId || canonicalId.startsWith("mock-")) return;
+    if (viewIncrementedRef.current === canonicalId) return;
+    viewIncrementedRef.current = canonicalId;
+
+    incrementEventViews(canonicalId).then(({ error }) => {
+      if (error) {
+        console.warn("[event view] increment failed silently:", error);
+        return;
+      }
+      // Refresh the cached query so the displayed view count is up-to-date.
+      const cached = (event as any);
+      if (cached?.event_metrics) {
+        const currentViews =
+          (cached.event_metrics as { views: number } | null)?.views ?? 0;
+        setQueryData(["event", eventId], {
+          ...cached,
+          event_metrics: { views: currentViews + 1 },
+        });
+      }
+    });
+  }, [(event as any)?.id, eventId]);
 
   const toggleWaitlist = useMutation({
     mutationFn: async ({ isOnWaitlist }: { isOnWaitlist: boolean }) => {
@@ -1195,6 +1217,15 @@ export default function EventDetailsPage() {
               <Users className="h-5 w-5" />
               <span>{attendeeCount} RSVP&apos;d</span>
             </div>
+            <div className="flex items-center gap-2">
+              <Eye className="h-5 w-5" />
+              <span>
+                {(
+                  ((event as any).event_metrics as { views: number } | null)?.views ?? 0
+                ).toLocaleString()}{" "}
+                views
+              </span>
+            </div>
           </div>
 
           <div className="mt-6 max-w-md">
@@ -1325,6 +1356,7 @@ export default function EventDetailsPage() {
                   {exportCsv.isPending ? "Exporting..." : "Export CSV"}
                 </Button>
                 <CreatePollDialog eventId={eventId} user={user!} onPollCreated={() => refetch()} />
+                <EditEventDialog event={event} user={user} onSuccess={() => refetch()} />
               </>
             )}
 
@@ -1484,7 +1516,7 @@ export default function EventDetailsPage() {
                 <div
                   id="event-description-container"
                   className="prose prose-lg max-w-none dark:prose-invert prose-headings:scroll-mt-24"
-                  dangerouslySetInnerHTML={{ __html: event.description }}
+                  dangerouslySetInnerHTML={{ __html: event.description || "" }}
                 />
               </main>
               <aside className="lg:w-64 shrink-0">

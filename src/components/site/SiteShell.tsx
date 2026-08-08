@@ -8,7 +8,7 @@ import { Joyride } from "react-joyride";
 import { Footer } from "./Footer";
 import { Navbar } from "./Navbar";
 import { BugReportWidget } from "@/components/BugReportWidget";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AutoBreadcrumbs } from "@/components/ui/AutoBreadcrumbs";
 
 export function SiteShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -96,11 +96,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
     },
   ];
 
-  const JoyrideComponent = Joyride as unknown as React.ComponentType<Record<string, unknown>>;
   const isEmailUnverified = !!user && !emailVerified;
-
-  // Render Joyride dynamic wrapper component safely
-  const JoyrideComponent = Joyride as unknown as React.ComponentType<Record<string, unknown>>;
 
   return (
     <div className="college-shell flex min-h-screen flex-col bg-cream text-black transition-colors dark:bg-brand-gray-base-900 dark:text-cream">
@@ -152,7 +148,6 @@ export function SiteShell({ children }: { children: ReactNode }) {
               fontFamily: "monospace",
               fontWeight: "bold",
             },
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as any
         }
       />
@@ -167,7 +162,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
         </div>
       )}
       <main id="main-content" tabIndex={-1} className="flex-1 pb-16 md:pb-0">
-        <Breadcrumbs />
+        <AutoBreadcrumbs />
         {children}
       </main>
       <Footer />
