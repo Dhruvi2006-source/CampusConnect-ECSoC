@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { WebRTCProvider } from "@/components/VideoCall/WebRTCProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -15,7 +16,8 @@ import { SessionExpiryModal } from "@/components/SessionExpiryModal";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import { CommandPalette } from "@/components/ui/command-palette";
 import { showAnnouncementToast } from "@/lib/announcements/sse";
-
+import { SkipToContent } from "@/components/SkipToContent";
+import ImpersonationBanner from "@/components/ImpersonationBanner";
 // Persistent banner shown while the browser has no network connection.
 function OfflineBanner() {
   const [isOffline, setIsOffline] = useState(
@@ -51,6 +53,14 @@ function OfflineBanner() {
 
 export default function Layout() {
   const location = useLocation();
+  const { i18n } = useTranslation();
+
+  // Keep <html lang="..."> in sync with the active language
+  // Required for accessibility (screen readers), SEO, and browser behaviour
+  useEffect(() => {
+    const lang = i18n.language?.split("-")[0] ?? "en";
+    document.documentElement.lang = lang;
+  }, [i18n.language]);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -160,6 +170,7 @@ export default function Layout() {
   return (
     <TooltipProvider delayDuration={200}>
       <WebRTCProvider>
+        <SkipToContent />
         <OfflineBanner />
         <TopProgressBar />
         <SessionExpiryModal />
@@ -167,7 +178,10 @@ export default function Layout() {
         <ShortcutsModal open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
         <PWAInstallPrompt />
 
-        <Outlet />
+        <main id="main-content" className="flex-1 w-full h-full min-h-screen">
+          <Outlet />
+        </main>
+
         <Toaster />
         <ScrollToTop />
         <RadialFAB />
@@ -175,5 +189,6 @@ export default function Layout() {
         <CommandPalette />
       </WebRTCProvider>
     </TooltipProvider>
+    <ImpersonationBanner />
   );
 }
