@@ -9,7 +9,10 @@ import { NavbarNotificationDropdown } from "./NavbarNotificationDropdown";
 import { BookmarksPanel } from "@/components/BookmarksPanel";
 import { createClient } from "@/lib/supabase/client";
 
-import { Menu, X, WifiOff, Bookmark } from "lucide-react";
+import Menu from "lucide-react/dist/esm/icons/menu";
+import X from "lucide-react/dist/esm/icons/x";
+import WifiOff from "lucide-react/dist/esm/icons/wifi-off";
+import Bookmark from "lucide-react/dist/esm/icons/bookmark";
 import { useAuthHydration } from "@/hooks/useAuthHydration";
 import { ProfileHeaderSkeleton } from "@/components/ProfileHeaderSkeleton";
 import {
@@ -21,11 +24,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+const links = [
+  { to: "/events", label: "Events" },
+  { to: "/clubs", label: "Clubs" },
+  { to: "/feed", label: "Feed" },
+  { to: "/gallery", label: "Gallery" },
+  { to: "/certificates", label: "Certificates" },
+  { to: "/dashboard", label: "Dashboard" },
+] as const;
+
 export function Navbar() {
   const { user, isInitializing } = useAuthHydration();
-  const handleSignOut = () => {
-    // TODO: wire to actual sign out
-  };
   const location = useLocation();
   const { t, i18n } = useTranslation();
   const currentPath = location.pathname;
