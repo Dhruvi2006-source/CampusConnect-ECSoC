@@ -266,6 +266,14 @@ export default function CampusEventTicketingPage() {
           />
         ) : (
           <>
+            {/* Campus Safety Escort Banner for Late Night Events */}
+            <CampusSafetyEscortModule
+              eventTitle="Fall Music Fest & Indie Band Concert"
+              eventVenue="Outdoor Amphitheater Quad"
+              eventEndTime="Friday, Oct 28 @ 11:30 PM"
+              eventId="evt-902"
+            />
+
             {/* Filter Pills */}
             <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider mr-2">
