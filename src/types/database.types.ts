@@ -448,6 +448,48 @@ export type Database = {
         Update: { micro_event_id?: string; user_id?: string; joined_at?: string };
         Relationships: [];
       };
+      event_song_requests: {
+        Row: {
+          id: string;
+          event_id: string;
+          user_id: string;
+          song_title: string;
+          artist: string;
+          album_art_url: string | null;
+          upvotes: number;
+          played: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          user_id: string;
+          song_title: string;
+          artist: string;
+          album_art_url?: string | null;
+          upvotes?: number;
+          played?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          event_id?: string;
+          user_id?: string;
+          song_title?: string;
+          artist?: string;
+          album_art_url?: string | null;
+          upvotes?: number;
+          played?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      event_song_request_upvotes: {
+        Row: { request_id: string; user_id: string; created_at: string };
+        Insert: { request_id: string; user_id: string; created_at?: string };
+        Update: { request_id?: string; user_id?: string; created_at?: string };
+        Relationships: [];
+      };
       user_preferences: {
         Row: {
           user_id: string;
