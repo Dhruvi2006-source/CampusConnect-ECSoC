@@ -69,7 +69,8 @@ export interface ClubMember {
   status: "pending" | "approved" | "rejected" | "removed";
   joined_at?: string | null;
   removed_at?: string | null;
-  termination_reason?: "term_completed" | "resigned" | "impeached" | "removed" | "role_changed" | string | null;
+  termination_reason?:
+    "term_completed" | "resigned" | "impeached" | "removed" | "role_changed" | string | null;
   created_at: string;
 }
 
@@ -177,6 +178,21 @@ export interface Certificate {
   issued_at: string;
   /** Timestamp when delivery email was sent */
   email_sent_at?: string | null;
+}
+
+/**
+ * Represents a hardware kiosk telemetry record in `kiosk_devices`.
+ */
+export interface KioskDevice {
+  device_id: string;
+  event_id?: string | null;
+  battery_level: number;
+  is_charging: boolean;
+  ping_ms: number;
+  network_type?: string | null;
+  last_seen: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**

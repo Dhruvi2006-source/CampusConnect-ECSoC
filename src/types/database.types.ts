@@ -448,6 +448,42 @@ export type Database = {
         Update: { micro_event_id?: string; user_id?: string; joined_at?: string };
         Relationships: [];
       };
+      kiosk_devices: {
+        Row: {
+          device_id: string;
+          event_id: string | null;
+          battery_level: number;
+          is_charging: boolean;
+          ping_ms: number;
+          network_type: string | null;
+          last_seen: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          device_id: string;
+          event_id?: string | null;
+          battery_level?: number;
+          is_charging?: boolean;
+          ping_ms?: number;
+          network_type?: string | null;
+          last_seen?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          device_id?: string;
+          event_id?: string | null;
+          battery_level?: number;
+          is_charging?: boolean;
+          ping_ms?: number;
+          network_type?: string | null;
+          last_seen?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       user_preferences: {
         Row: {
           user_id: string;
