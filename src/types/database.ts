@@ -196,6 +196,14 @@ export interface UserPreferences {
   quiet_hours_end?: string | null;
   created_at?: string;
   updated_at?: string;
+ * Represents a video transcript record in `resource_transcripts`.
+ */
+export interface ResourceTranscript {
+  resource_id: string;
+  transcript_text: string;
+  vtt_url: string;
+  translated_vtt_urls?: Record<string, string> | null;
+  created_at?: string;
 }
 
 /**
