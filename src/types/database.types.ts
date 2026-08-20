@@ -455,6 +455,11 @@ export type Database = {
           push_notifications: boolean;
           digest: boolean;
           dark_mode_default: boolean;
+          timezone?: string | null;
+          dnd_start_time?: string | null;
+          dnd_end_time?: string | null;
+          quiet_hours_start?: string | null;
+          quiet_hours_end?: string | null;
           updated_at: string;
         };
         Insert: {
@@ -463,6 +468,11 @@ export type Database = {
           push_notifications?: boolean;
           digest?: boolean;
           dark_mode_default?: boolean;
+          timezone?: string | null;
+          dnd_start_time?: string | null;
+          dnd_end_time?: string | null;
+          quiet_hours_start?: string | null;
+          quiet_hours_end?: string | null;
           updated_at?: string;
         };
         Update: {
@@ -471,6 +481,11 @@ export type Database = {
           push_notifications?: boolean;
           digest?: boolean;
           dark_mode_default?: boolean;
+          timezone?: string | null;
+          dnd_start_time?: string | null;
+          dnd_end_time?: string | null;
+          quiet_hours_start?: string | null;
+          quiet_hours_end?: string | null;
           updated_at?: string;
         };
         Relationships: [];

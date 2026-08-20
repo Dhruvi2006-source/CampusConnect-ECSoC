@@ -69,7 +69,8 @@ export interface ClubMember {
   status: "pending" | "approved" | "rejected" | "removed";
   joined_at?: string | null;
   removed_at?: string | null;
-  termination_reason?: "term_completed" | "resigned" | "impeached" | "removed" | "role_changed" | string | null;
+  termination_reason?:
+    "term_completed" | "resigned" | "impeached" | "removed" | "role_changed" | string | null;
   created_at: string;
 }
 
@@ -177,6 +178,24 @@ export interface Certificate {
   issued_at: string;
   /** Timestamp when delivery email was sent */
   email_sent_at?: string | null;
+}
+
+/**
+ * Represents user settings and notification schedule preferences in `user_preferences`.
+ */
+export interface UserPreferences {
+  user_id: string;
+  email_alerts: boolean;
+  push_notifications: boolean;
+  digest: boolean;
+  dark_mode_default: boolean;
+  timezone?: string | null;
+  dnd_start_time?: string | null;
+  dnd_end_time?: string | null;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**
