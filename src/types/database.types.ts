@@ -786,6 +786,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      registrar_sync_logs: {
+        Row: {
+          id: string;
+          user_id: string;
+          student_id: string;
+          user_full_name: string;
+          previous_status: string;
+          new_status: string;
+          action_taken: string;
+          clubs_notified_count: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          student_id: string;
+          user_full_name: string;
+          previous_status?: string;
+          new_status: string;
+          action_taken?: string;
+          clubs_notified_count?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          student_id?: string;
+          user_full_name?: string;
+          previous_status?: string;
+          new_status?: string;
+          action_taken?: string;
+          clubs_notified_count?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       events: {
         Row: {
           id: string;
@@ -803,6 +839,7 @@ export type Database = {
 
           location: any;
           metadata: Json | null;
+          refund_policy: Json | null;
           latitude: number | null;
           longitude: number | null;
           geofencing_enabled: boolean;
