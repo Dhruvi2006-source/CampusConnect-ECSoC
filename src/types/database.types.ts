@@ -791,6 +791,7 @@ export type Database = {
 
           location: any;
           metadata: Json | null;
+          refund_policy: Json | null;
           latitude: number | null;
           longitude: number | null;
           geofencing_enabled: boolean;
