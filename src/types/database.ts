@@ -218,6 +218,23 @@ export type DatabaseTable =
   | "comments"
   | "certificates";
 
+export interface CrossClubMatch {
+  id: string;
+  draft_a_id: string;
+  draft_b_id: string;
+  club_a_id: string;
+  club_b_id: string;
+  club_a_name: string;
+  club_b_name: string;
+  similarity_score: number;
+  status: "PENDING" | "PROPOSED" | "ACCEPTED" | "DECLINED";
+  draft_a_budget: number;
+  draft_b_budget: number;
+  pooled_budget: number;
+  created_at: string;
+  updated_at?: string;
+}
+
 /**
  * Generic Row Type
  * Maps a table name to its corresponding TypeScript interface.
