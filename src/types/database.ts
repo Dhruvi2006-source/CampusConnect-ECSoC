@@ -416,6 +416,24 @@ export interface CoHostFinancialSplitResult {
   transfers?: CoHostTransferItem[];
 }
 
+export interface UserLeaderboardEntry {
+  user_id: string;
+  first_name: string;
+  last_name: string;
+  avatar_url?: string | null;
+  monthly_points: number;
+  rank_position: number;
+}
+
+export interface ClubLeaderboardEntry {
+  club_id: string;
+  club_name: string;
+  logo_url?: string | null;
+  slug: string;
+  monthly_points: number;
+  rank_position: number;
+}
+
 /**
  * Generic Row Type
  * Maps a table name to its corresponding TypeScript interface.
