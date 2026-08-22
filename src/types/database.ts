@@ -279,6 +279,47 @@ export interface CrossClubMatch {
   updated_at?: string;
 }
 
+export interface TicketBundle {
+  id: string;
+  club_id: string;
+  bundle_name: string;
+  description?: string | null;
+  price_dollars: number;
+  original_total_price: number;
+  discount_percentage: number;
+  status: "ACTIVE" | "ARCHIVED";
+  created_at: string;
+}
+
+export interface BundleEventItem {
+  bundle_id: string;
+  event_id: string;
+  event_title: string;
+  event_date?: string | null;
+  ticket_price: number;
+  max_attendees?: number | null;
+  rsvp_count: number;
+  is_sold_out: boolean;
+}
+
+export interface BundlePurchaseRecord {
+  id: string;
+  bundle_id: string;
+  user_id: string;
+  amount_paid: number;
+  stripe_session_id?: string | null;
+  status: "COMPLETED" | "REFUNDED";
+  created_at: string;
+}
+
+export interface BundleAvailabilityStatus {
+  available: boolean;
+  bundle: TicketBundle;
+  events: BundleEventItem[];
+  sold_out_event_name?: string | null;
+  total_savings_dollars: number;
+}
+
 /**
  * Generic Row Type
  * Maps a table name to its corresponding TypeScript interface.
